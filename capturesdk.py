@@ -3,22 +3,17 @@ import sys
 import time
 import numpy as np
 import cv2
-import holoeye_slim
 
-# Replace PySpin import with your camera SDK if needed
+# Holoeye SDK is now required — script will fail if not installed
+import holoeye_slim as slm
+
+# Camera is still optional
 try:
     import PySpin
     USE_CAMERA = True
 except ImportError:
     print("PySpin not found; running in display-only mode.")
     USE_CAMERA = False
-
-# Import Holoeye SLM SDK
-try:
-    import holoeye_slim as slm
-except ImportError:
-    print("Holoeye SLM SDK not found. Install holoeye_slim.")
-    sys.exit(1)
 
 OUTPUT_DIR = r"C:\Users\kiyotaka\Desktop\qsa\captures"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -46,7 +41,7 @@ if USE_CAMERA:
         print("No camera found")
         USE_CAMERA = False
 
-# Initialize SLM
+# Initialize SLM — mandatory
 device = slm.SLM()  # Connect to first available SLM
 print("SLM initialized.")
 
