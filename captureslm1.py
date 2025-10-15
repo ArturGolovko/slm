@@ -73,20 +73,20 @@ print("PySpin camera initialized successfully.\n")
 # Main Loop: Display + Capture
 # -------------------------
 for gray_val in range(NUM_GRAY_LEVELS):
-    # Create uniform gray pattern
-    img_array = np.full((SLM_HEIGHT, SLM_WIDTH), gray_val, dtype=np.uint8)
+    img_array = np.zeros((SLM_HEIGHT, SLM_WIDTH), dtype=np.uint8)
+    img_array[:, :SLM_WIDTH // 2] = 255
+    img_array[:, SLM_WIDTH // 2:] = gray_val
 
-    # Load and display on SLM
     err, dataHandle = slm.loadImageData(img_array)
     assert err == HEDSERR_NoError, HEDS.SDK.ErrorString(err)
     err = dataHandle.show()
     assert err == HEDSERR_NoError, HEDS.SDK.ErrorString(err)
 
-    # Save the pattern shown on SLM
-    slm_filename = f"SLM_gray_{gray_val:03d}.bmp"
+    # Save pattern image
+    slm_filename = f"SLM_halfgray_{gray_val:03d}.bmp"
     cv2.imwrite(os.path.join(OUTPUT_DIR, slm_filename), img_array)
 
-    # Wait briefly to ensure the pattern is visible
+    # Allow SLM to update
     time.sleep(0.1)
 
     # Capture from camera
