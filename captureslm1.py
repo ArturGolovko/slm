@@ -4,28 +4,22 @@ import time
 import numpy as np
 import cv2
 
-# Add HEDS folder to path (adjust the path)
+# -------------------------
+# Setup
+# -------------------------
+# Add HEDS SDK to path (adjust this to your actual install)
 sys.path.append(r"C:\Path\To\HEDS")
 
-# Try importing PySpin (FLIR/Spinnaker SDK)
+# Try importing PySpin
 try:
     import PySpin
-    USE_PYSPIN = True
 except ImportError:
-    print("PySpin not found; will attempt Thorlabs camera only.")
-    USE_PYSPIN = False
+    print("PySpin (Spinnaker SDK) not found. Please install it first.")
+    sys.exit(1)
 
-# Import HEDS
+# Import HEDS SDK
 import HEDS
 from hedslib.heds_types import *
-
-# Optional Thorlabs camera SDK
-try:
-    from thorlabs_tsi_sdk.tl_camera import TLCameraSDK
-    USE_TSI = True
-except ImportError:
-    print("Thorlabs TSI SDK not found.")
-    USE_TSI = False
 
 # -------------------------
 # Configuration
@@ -35,7 +29,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 SLM_WIDTH = 1024
 SLM_HEIGHT = 768
-NUM_IMAGES = 256  # 0 to 255 grayscale
+NUM_GRAY_LEVELS = 256  # 0–255 inclusive
 
 # -------------------------
 # Initialize HEDS SLM
@@ -48,120 +42,74 @@ slm = HEDS.SLM.Init()
 assert slm.errorCode() == HEDSERR_NoError, HEDS.SDK.ErrorString(slm.errorCode())
 
 # -------------------------
-# Initialize Cameras
+# Initialize PySpin Camera
 # -------------------------
-pyspin_camera = None
-tsi_camera = None
-pyspin_system = None
-pyspin_cams = None
-tsi_sdk = None
+system = PySpin.System.GetInstance()
+cams = system.GetCameras()
+if cams.GetSize() == 0:
+    print("No PySpin-compatible camera detected.")
+    system.ReleaseInstance()
+    sys.exit(1)
 
-if USE_PYSPIN:
-    pyspin_system = PySpin.System.GetInstance()
-    pyspin_cams = pyspin_system.GetCameras()
-    if pyspin_cams.GetSize() > 0:
-        pyspin_camera = pyspin_cams.GetByIndex(0)
-        pyspin_camera.Init()
-        nodemap = pyspin_camera.GetNodeMap()
+camera = cams.GetByIndex(0)
+camera.Init()
 
-        # Continuous acquisition
-        acq = PySpin.CEnumerationPtr(nodemap.GetNode("AcquisitionMode"))
-        ac_cont = acq.GetEntryByName("Continuous")
-        acq.SetIntValue(ac_cont.GetValue())
+nodemap = camera.GetNodeMap()
 
-        # Mono8 pixel format
-        pixel_format = PySpin.CEnumerationPtr(nodemap.GetNode("PixelFormat"))
-        mono8 = pixel_format.GetEntryByName("Mono8")
-        pixel_format.SetIntValue(mono8.GetValue())
+# Continuous acquisition mode
+acq = PySpin.CEnumerationPtr(nodemap.GetNode("AcquisitionMode"))
+ac_cont = acq.GetEntryByName("Continuous")
+acq.SetIntValue(ac_cont.GetValue())
 
-        pyspin_camera.BeginAcquisition()
-        print("PySpin camera initialized.")
-    else:
-        print("No PySpin camera found.")
-        USE_PYSPIN = False
+# Pixel format: Mono8 (grayscale)
+pixel_format = PySpin.CEnumerationPtr(nodemap.GetNode("PixelFormat"))
+mono8 = pixel_format.GetEntryByName("Mono8")
+pixel_format.SetIntValue(mono8.GetValue())
 
-if USE_TSI:
-    tsi_sdk = TLCameraSDK()
-    cameras = tsi_sdk.discover_available_cameras()
-    if cameras:
-        tsi_camera = tsi_sdk.open_camera(cameras[0])
-        tsi_camera.exposure_time_us = 20000
-        tsi_camera.frames_per_trigger_zero_for_unlimited = 0
-        tsi_camera.image_poll_timeout_ms = 5000
-        tsi_camera.arm(2)
-        print("Thorlabs TSI camera initialized.")
-    else:
-        print("No Thorlabs camera detected.")
-        USE_TSI = False
+camera.BeginAcquisition()
+print("PySpin camera initialized successfully.\n")
 
 # -------------------------
-# Display patterns + Capture
+# Main Loop: Display + Capture
 # -------------------------
-for gray_val in range(256):  # 0–255
-    # Generate half-white, half-gray pattern
-    img_array = np.zeros((SLM_HEIGHT, SLM_WIDTH), dtype=np.uint8)
-    img_array[:, :SLM_WIDTH // 2] = 255
-    img_array[:, SLM_WIDTH // 2:] = gray_val
+for gray_val in range(NUM_GRAY_LEVELS):
+    # Create uniform gray pattern
+    img_array = np.full((SLM_HEIGHT, SLM_WIDTH), gray_val, dtype=np.uint8)
 
-    # Load and show pattern on SLM
+    # Load and display on SLM
     err, dataHandle = slm.loadImageData(img_array)
     assert err == HEDSERR_NoError, HEDS.SDK.ErrorString(err)
     err = dataHandle.show()
     assert err == HEDSERR_NoError, HEDS.SDK.ErrorString(err)
 
-    # Save SLM pattern locally
-    pattern_filename = f"SLM_gray_{gray_val:03d}.bmp"
-    cv2.imwrite(os.path.join(OUTPUT_DIR, pattern_filename), img_array)
+    # Save the pattern shown on SLM
+    slm_filename = f"SLM_gray_{gray_val:03d}.bmp"
+    cv2.imwrite(os.path.join(OUTPUT_DIR, slm_filename), img_array)
 
-    # Small delay to ensure SLM update
-    time.sleep(0.05)
+    # Wait briefly to ensure the pattern is visible
+    time.sleep(0.1)
 
-    # Capture PySpin camera image
-    if USE_PYSPIN and pyspin_camera:
-        try:
-            img = pyspin_camera.GetNextImage()
-            if not img.IsIncomplete():
-                frame = img.GetNDArray()
-                capture_filename = f"PySpin_gray_{gray_val:03d}.bmp"
-                cv2.imwrite(os.path.join(OUTPUT_DIR, capture_filename), frame)
-                print(f"Gray={gray_val} → PySpin captured {capture_filename}")
-            img.Release()
-        except Exception as e:
-            print(f"PySpin capture failed at gray={gray_val}: {e}")
-
-    # Capture Thorlabs TSI camera image
-    if USE_TSI and tsi_camera:
-        frame = tsi_camera.get_pending_frame_or_null()
-        if frame is not None:
-            frame_data = frame.image_buffer.copy()
-            capture_filename = f"TSI_gray_{gray_val:03d}.bmp"
-            cv2.imwrite(os.path.join(OUTPUT_DIR, capture_filename), frame_data)
-            print(f"Gray={gray_val} → TSI captured {capture_filename}")
-        tsi_camera.issue_software_trigger()
+    # Capture from camera
+    try:
+        img = camera.GetNextImage()
+        if not img.IsIncomplete():
+            frame = img.GetNDArray()
+            capture_filename = f"Capture_gray_{gray_val:03d}.bmp"
+            cv2.imwrite(os.path.join(OUTPUT_DIR, capture_filename), frame)
+            print(f"[{gray_val:03d}/255] Captured → {capture_filename}")
+        img.Release()
+    except Exception as e:
+        print(f"Capture failed at gray={gray_val}: {e}")
 
 # -------------------------
 # Cleanup
 # -------------------------
-if USE_PYSPIN and pyspin_camera:
-    pyspin_camera.EndAcquisition()
-    pyspin_camera.DeInit()
-    del pyspin_camera
-
-if USE_PYSPIN and pyspin_cams:
-    pyspin_cams.Clear()
-    del pyspin_cams
-
-if USE_PYSPIN and pyspin_system:
-    pyspin_system.ReleaseInstance()
-
-if USE_TSI and tsi_camera:
-    tsi_camera.disarm()
-    tsi_camera.dispose()
-
-if USE_TSI and tsi_sdk:
-    tsi_sdk.dispose()
+camera.EndAcquisition()
+camera.DeInit()
+cams.Clear()
+system.ReleaseInstance()
 
 slm.close()
 HEDS.SDK.Close()
 
-print("Done.")
+print("\nDone.")
