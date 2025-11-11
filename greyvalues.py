@@ -7,17 +7,14 @@ import cv2
 # -------------------------
 # Setup
 # -------------------------
-# Add HEDS SDK to path (adjust this to your actual install)
 sys.path.append(r"C:\Path\To\HEDS")
 
-# Try importing PySpin
 try:
     import PySpin
 except ImportError:
     print("PySpin (Spinnaker SDK) not found. Please install it first.")
     sys.exit(1)
 
-# Import HEDS SDK
 import HEDS
 from hedslib.heds_types import *
 
@@ -29,7 +26,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 SLM_WIDTH = 1024
 SLM_HEIGHT = 768
-NUM_GRAY_LEVELS = 256  # 0–255 inclusive
+NUM_GRAY_LEVELS = 256
 
 # -------------------------
 # Initialize HEDS SLM
